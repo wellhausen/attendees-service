@@ -6,7 +6,6 @@ const mongoose = require("mongoose");
 const amqp = require("amqplib/callback_api");
 const config = require("config");
 const dbConfig = config.get("dbConfig.db");
-//const mongoDB = "mongodb://admin:admin1@ds031978.mlab.com:31978/attendees";
 
 mongoose.connect(dbConfig, {
   useNewUrlParser: true,
