@@ -16,9 +16,9 @@ To sign up for an event, send a POST to http://localhost:3001/attendees
 "event": "concert"
 }
 
-Will receive an error if a value is missing, or if event is already at capacity.
+Will receive an error response if a value is missing, or if event is already at capacity.
 
-Messages are published to the "attendee.verified" channel.
+Once an attendee is approved, a message is published to the "attendee.verified" channel in the same shape as the original POST request.
 
 To run NPM install, and add config/default.json with the following data:
 {"dbConfig":{"db": "mongodb://admin:admin1@ds031978.mlab.com:31978/attendees"}}

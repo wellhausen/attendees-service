@@ -125,6 +125,7 @@ amqp.connect("amqp://localhost", (err, connection) => {
         });
 
         await attendee.save();
+
         channel.publish("attendee.verified", "", Buffer.from(payload));
 
         let updatedEvent = new Event({
@@ -143,7 +144,9 @@ amqp.connect("amqp://localhost", (err, connection) => {
             console.log("Deleted : ", docs);
           }
         });
+
         console.log("payload:", payload);
+
         res.send("created:", attendee);
       } else {
         res.send("Event already at capacity");
