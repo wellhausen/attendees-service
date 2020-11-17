@@ -1,7 +1,8 @@
 const express = require("express");
 const bodyParser = require("body-parser");
 const app = express();
-const { Attendee, validate } = require("./model");
+const { Attendee, validate } = require("./models/attendee");
+const { Event } = require("./models/event");
 const mongoose = require("mongoose");
 const amqp = require("amqplib/callback_api");
 const config = require("config");
@@ -10,6 +11,7 @@ const dbConfig = config.get("dbConfig.db");
 mongoose.connect(dbConfig, {
   useNewUrlParser: true,
   useUnifiedTopology: true,
+  retryWrites: false,
 });
 
 var db = mongoose.connection;
@@ -29,15 +31,92 @@ amqp.connect("amqp://localhost", (err, connection) => {
   connection.createChannel((err, channel) => {
     if (err) return console.error(err);
 
-    const queueName = "attendee.verified";
+    const queueName = "event.create";
     channel.assertQueue(queueName, { durable: true });
+
+    channel.consume(queueName, async (message) => {
+      try {
+        const payload = JSON.parse(message.content.toString());
+        console.log("Received:", payload);
+
+        // check if event already created
+
+        const event = new Event({
+          maxAllowed: payload.generalAttendance,
+          eventId: payload._id,
+          eventName: payload.name,
+          totalAttendees: payload.totalAttendees ? payload.totalAttendees : 0,
+        });
+        await event.save();
+      } catch (e) {
+        console.error(e);
+      }
+      channel.ack(message);
+    });
+  });
+
+  connection.createChannel(async (err, channel) => {
+    if (err) return console.error(err);
+
+    const queueName = "event.modify";
+
+    channel.assertQueue(queueName, { durable: true });
+
+    channel.consume(queueName, async (message) => {
+      try {
+        const payload = JSON.parse(message.content.toString());
+        console.log("Received:", payload);
+
+        let currentEvent = Event.findOne({ evendId: payload._id });
+
+        Event.findOneAndUpdate(
+          { eventId: payload._id },
+          {
+            eventName: payload.name,
+            maxAllowed: payload.generalAttendance,
+            totalAttendees: currentEvent.totalAttendees,
+            new: true,
+          },
+          null,
+          function (err, docs) {
+            if (err) {
+              console.log(err);
+            } else {
+              console.log("Original Doc : ", docs);
+            }
+          }
+        );
+
+        await Event.save();
+      } catch (e) {
+        console.error(e);
+      }
+      channel.ack(message);
+    });
+  });
+
+  connection.createChannel((err, channel) => {
+    if (err) return console.error(err);
+
+    const exchange = "attendee.verified";
+    channel.assertExchange(exchange, "fanout", {
+      durable: true,
+    });
 
     app.post("/attendees", async (req, res) => {
       const { error } = validate(req.body);
       if (error) res.send(error.details[0].message);
-      else {
-        const payload = Buffer.from(JSON.stringify(req.body));
 
+      const payload = Buffer.from(JSON.stringify(req.body));
+
+      const currentEvent = await Event.findOne(
+        { eventName: req.body.event },
+        { eventName: 1, _id: 1, maxAllowed: 1, totalAttendees: 1, eventId: 1 }
+      );
+
+      if (!currentEvent) res.send("Event not found");
+
+      if (currentEvent.totalAttendees + 1 <= currentEvent.maxAllowed) {
         const attendee = new Attendee({
           name: req.body.name,
           email: req.body.email,
@@ -46,9 +125,28 @@ amqp.connect("amqp://localhost", (err, connection) => {
         });
 
         await attendee.save();
-        channel.sendToQueue(queueName, payload);
+        channel.publish("attendee.verified", "", Buffer.from(payload));
+
+        let updatedEvent = new Event({
+          eventName: currentEvent.eventName,
+          totalAttendees: currentEvent.totalAttendees + 1,
+          maxAllowed: currentEvent.maxAllowed,
+          eventId: currentEvent.eventId,
+        });
+
+        await updatedEvent.save();
+
+        Event.findByIdAndDelete(currentEvent._id, function (err, docs) {
+          if (err) {
+            console.log(err);
+          } else {
+            console.log("Deleted : ", docs);
+          }
+        });
         console.log("payload:", payload);
-        res.send(attendee);
+        res.send("created:", attendee);
+      } else {
+        res.send("Event already at capacity");
       }
     });
   });
