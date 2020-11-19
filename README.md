@@ -1,4 +1,4 @@
-Attendees Microservice using Express.js, MongoDB, and RabbitMQ
+Attendees Microservice
 ---
 
 To submit an attendee, POST to /attendees. All fields are required. 
