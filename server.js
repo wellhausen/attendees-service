@@ -7,6 +7,7 @@ const mongoose = require("mongoose");
 const amqp = require("amqplib/callback_api");
 const config = require("config");
 const dbConfig = config.get("dbConfig.db");
+const CircuitBreaker = require("opossum");
 
 mongoose.connect(dbConfig, {
   useNewUrlParser: true,
@@ -54,6 +55,16 @@ amqp.connect("amqp://localhost", (err, connection) => {
       channel.ack(message);
     });
   });
+
+  const options = {
+    timeout: 3000,
+    errorThresholdPercentage: 50,
+    resetTimeout: 30000,
+  };
+
+  const breaker = new CircuitBreaker(amqp.connect, options);
+
+  breaker.fire(params).then(console.log).catch(console.error);
 
   connection.createChannel(async (err, channel) => {
     if (err) return console.error(err);
