@@ -81,7 +81,7 @@ amqp.connect("amqp://localhost", (err, connection) => {
           null,
           function (err, docs) {
             if (err) {
-              console.log(err);
+              console.log("err:", err);
             } else {
               console.log("Original Doc : ", docs);
             }
@@ -99,7 +99,24 @@ amqp.connect("amqp://localhost", (err, connection) => {
   connection.createChannel((err, channel) => {
     if (err) return console.error(err);
 
+    function asyncFunctionThatCouldFail(payload) {
+      return new Promise((resolve, reject) => {
+        channel.publish("attendee.verified", "", Buffer.from(payload));
+        resolve();
+      });
+    }
+
+    const attendeeVerifiedBreaker = new CircuitBreaker(
+      asyncFunctionThatCouldFail,
+      {
+        timeout: 3000,
+        errorThresholdPercentage: 50,
+        resetTimeout: 30000,
+      }
+    );
+
     const exchange = "attendee.verified";
+
     channel.assertExchange(exchange, "fanout", {
       durable: true,
     });
@@ -126,7 +143,12 @@ amqp.connect("amqp://localhost", (err, connection) => {
         });
 
         await attendee.save();
+
         res.status(200).send(attendee);
+        attendeeVerifiedBreaker
+          .fire(payload)
+          .then(console.log("published successfully"))
+          .catch(console.error);
 
         let updatedEvent = new Event({
           eventName: currentEvent.eventName,
@@ -147,21 +169,6 @@ amqp.connect("amqp://localhost", (err, connection) => {
       } else {
         res.status(401).send("Event already at capacity");
       }
-
-      //channel.publish("attendee.verified", "", Buffer.from(payload));
-
-      const breaker = new CircuitBreaker(
-        channel.publish("attendee.verified", "", Buffer.from(payload)),
-        {
-          timeout: 3000,
-          errorThresholdPercentage: 50,
-          resetTimeout: 30000,
-        }
-      );
-      breaker
-        .fire()
-        .then(console.log("payload:", payload))
-        .catch(console.error("unsuccessfully published to channel"));
     });
   });
 });
