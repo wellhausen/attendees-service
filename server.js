@@ -26,12 +26,6 @@ app.listen(3001, function () {
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(bodyParser.json());
 
-// const options = {
-//   timeout: 3000,
-//   errorThresholdPercentage: 50,
-//   resetTimeout: 30000,
-// };
-
 amqp.connect("amqp://localhost", (err, connection) => {
   if (err) return console.error(err);
 
@@ -133,7 +127,6 @@ amqp.connect("amqp://localhost", (err, connection) => {
 
         await attendee.save();
         res.status(200).send(attendee);
-        //channel.publish("attendee.verified", "", Buffer.from(payload));
 
         let updatedEvent = new Event({
           eventName: currentEvent.eventName,
