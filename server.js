@@ -26,6 +26,12 @@ app.listen(3001, function () {
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(bodyParser.json());
 
+// const options = {
+//   timeout: 3000,
+//   errorThresholdPercentage: 50,
+//   resetTimeout: 30000,
+// };
+
 amqp.connect("amqp://localhost", (err, connection) => {
   if (err) return console.error(err);
 
@@ -55,16 +61,6 @@ amqp.connect("amqp://localhost", (err, connection) => {
       channel.ack(message);
     });
   });
-
-  const options = {
-    timeout: 3000,
-    errorThresholdPercentage: 50,
-    resetTimeout: 30000,
-  };
-
-  const breaker = new CircuitBreaker(amqp.connect, options);
-
-  breaker.fire(params).then(console.log).catch(console.error);
 
   connection.createChannel(async (err, channel) => {
     if (err) return console.error(err);
@@ -116,7 +112,7 @@ amqp.connect("amqp://localhost", (err, connection) => {
 
     app.post("/attendees", async (req, res) => {
       const { error } = validate(req.body);
-      if (error) res.send(error.details[0].message);
+      if (error) res.status(400).send(error.details[0].message);
 
       const payload = Buffer.from(JSON.stringify(req.body));
 
@@ -125,7 +121,7 @@ amqp.connect("amqp://localhost", (err, connection) => {
         { eventName: 1, _id: 1, maxAllowed: 1, totalAttendees: 1, eventId: 1 }
       );
 
-      if (!currentEvent) res.send("Event not found");
+      if (!currentEvent) res.status(404).send("Event not found");
 
       if (currentEvent.totalAttendees + 1 <= currentEvent.maxAllowed) {
         const attendee = new Attendee({
@@ -136,8 +132,8 @@ amqp.connect("amqp://localhost", (err, connection) => {
         });
 
         await attendee.save();
-
-        channel.publish("attendee.verified", "", Buffer.from(payload));
+        res.status(200).send(attendee);
+        //channel.publish("attendee.verified", "", Buffer.from(payload));
 
         let updatedEvent = new Event({
           eventName: currentEvent.eventName,
@@ -155,13 +151,24 @@ amqp.connect("amqp://localhost", (err, connection) => {
             console.log("Deleted : ", docs);
           }
         });
-
-        console.log("payload:", payload);
-
-        res.send("created:", attendee);
       } else {
-        res.send("Event already at capacity");
+        res.status(401).send("Event already at capacity");
       }
+
+      //channel.publish("attendee.verified", "", Buffer.from(payload));
+
+      const breaker = new CircuitBreaker(
+        channel.publish("attendee.verified", "", Buffer.from(payload)),
+        {
+          timeout: 3000,
+          errorThresholdPercentage: 50,
+          resetTimeout: 30000,
+        }
+      );
+      breaker
+        .fire()
+        .then(console.log("payload:", payload))
+        .catch(console.error("unsuccessfully published to channel"));
     });
   });
 });
